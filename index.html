@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, orientation=landscape">
+    <title>VibeSites AI - 서울 지하철 3D 시뮬레이터</title>
+    <style>
+        /* 기본 스타일 초기화 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            touch-action: manipulation; /* 터치 제스처 처리 */
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            perspective: 1000px; /* 전역 Perspective 설정 */
+        }
+
+        /* 게임 컨테이너 */
+        .game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            transform-style: preserve-3d;
+        }
+
+        /* 3D 씬 (카메라 시점) */
+        .scene-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            transform-style: preserve-3d;
+            perspective: 1200px; /* 씬 자체의 깊이감 */
+            perspective-origin: 50% 65%; /* 카메라 위치 조정 */
+            display: flex;
+            justify-content: center;
+            align-items: flex-end; /* 열차 바닥을 기준에 맞춤 */
+            pointer-events: none; /* 씬 내부 요소는 클릭되지 않도록 */
+        }
+
+        /* 터널 및 배경 */
+        .tunnel-segment {
+            position: absolute;
+            width: 800px; /* 터널 폭 */
+            height: 500px; /* 터널 높이 */
+            transform-style: preserve-3d;
+            transform: translateZ(0); /* 초기 위치 */
+            opacity: 1;
+            transition: opacity 0.3s ease-out;
+        }
+
+        .tunnel-wall {
+            position: absolute;
+            background: linear-gradient(to right, #222, #333, #222); /* 터널 벽 기본 */
+            border: 1px solid #1a1a1a;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .tunnel-wall.left {
+            width: 100%; height: 100%;
+            transform: rotateY(90deg) translateZ(-400px);
+            background: linear-gradient(to bottom, #2a2a2a, #3a3a3a, #2a2a2a);
+        }
+        .tunnel-wall.right {
+            width: 100%; height: 100%;
+            transform: rotateY(-90deg) translateZ(-400px);
+            background: linear-gradient(to bottom, #2a2a2a, #3a3a3a, #2a2a2a);
+        }
+        .tunnel-wall.top {
+            width: 800px; height: 100%;
+            transform: rotateX(90deg) translateZ(250px);
+            background: linear-gradient(to right, #1a1a1a, #2a2a2a, #1a1a1a);
+        }
+        .tunnel-wall.bottom {
+            width: 800px; height: 100%;
+            transform: rotateX(-90deg) translateZ(250px);
+            background: linear-gradient(to right, #101010, #181818, #101010);
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.7);
+        }
+        .tunnel-wall.back {
+            width: 800px; height: 500px;
+            transform: translateZ(-500px); /* 세그먼트 간 간격 조정 */
+            background: linear-gradient(to bottom, #101010, #202020, #101010);
+        }
+
+        /* 레일 */
+        .rail-segment {
+            position: absolute;
+            width: 100px; /* 레일 간격 */
+            height: 500px; /* 레일 길이 */
+            bottom: 0;
+            left: 50%;
+            transform-style: preserve-3d;
+            transform: translateX(-50%) rotateX(-90deg) translateZ(0px); /* 바닥에 놓이도록 */
+            background: transparent;
+        }
+
+        .rail-inner {
+            position: absolute;
+            width: 5px; height: 100%;
+            background: linear-gradient(to bottom, #888, #555, #888);
+            box-shadow: 0 0 5px rgba(255, 255, 255, 0.2);
+        }
+        .rail-inner.left { left: 0; transform: translateX(-40px); } /* 레일 간격 조정 */
+        .rail-inner.right { right: 0; transform: translateX(40px); }
+
+        /* 터널 조명 */
+        .tunnel-light {
+            position: absolute;
+            width: 20px; height: 5px;
+            background-color: #ffcc00;
+            box-shadow: 0 0 15px 5px rgba(255, 204, 0, 0.7);
+            border-radius: 2px;
+            top: 0;
+            left: 50%;
+            transform: translate(-50%, 0) rotateX(90deg) translateZ(245px); /* 터널 상단에 부착 */
+            opacity: 0.8;
+        }
+
+        /* 지하철 열차 */
+        .train-container {
+            position: absolute;
+            bottom: 50px; /* 바닥에서 약간 위로 */
+            left: 50%;
+            transform: translateX(-50%) translateZ(100px) rotateX(-5deg); /* 카메라에 가깝게, 살짝 아래로 기울임 */
+            transform-style: preserve-3d;
+            width: 400px; /* 열차 폭 */
+            height: 150px; /* 열차 높이 */
+            z-index: 100;
+            animation: train-idle-shake 4s infinite ease-in-out;
+        }
+
+        @keyframes train-idle-shake {
+            0%, 100% { transform: translateX(-50%) translateZ(100px) rotateX(-5deg) translateY(0px) rotateZ(0deg); }
+            25% { transform: translateX(-50%) translateZ(100px) rotateX(-5deg) translateY(-0.5px) rotateZ(0.05deg); }
+            75% { transform: translateX(-50%) translateZ(100px) rotateX(-5deg) translateY(0.5px) rotateZ(-0.05deg); }
+        }
+
+        .train-car {
+            position: absolute;
+            width: 100px; /* 한 칸 길이 */
+            height: 150px;
+            transform-style: preserve-3d;
+            transform: translateX(0px);
+            transition: transform 0.1s ease-out; /* 흔들림에 사용 */
+        }
+
+        .train-car-body {
+            position: absolute;
+            width: 100%; height: 100%;
+            background: linear-gradient(to bottom, #eee, #ddd, #eee); /* 은색 차량 */
+            border: 2px solid #aaa;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3), inset 0 0 15px rgba(255, 255, 255, 0.5);
+            transform-style: preserve-3d;
+        }
+
+        .train-car-body::before, .train-car-body::after {
+            content: '';
+            position: absolute;
+            background: linear-gradient(to bottom, #444, #222, #444); /* 바퀴 부분 */
+            border-radius: 50%;
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
+            width: 20px; height: 20px;
+            bottom: -10px;
+        }
+        .train-car-body::before { left: 10px; }
+        .train-car-body::after { right: 10px; }
+
+        .train-front-face {
+            width: 100px; height: 150px;
+            background: linear-gradient(to right, #bbb, #ddd, #bbb);
+            transform: translateZ(50px); /* 열차 두께 */
+            position: absolute;
+        }
+        .train-rear-face {
+            width: 100px; height: 150px;
+            background: linear-gradient(to right, #bbb, #ddd, #bbb);
+            transform: translateZ(-50px);
+            position: absolute;
+        }
+        .train-top-face {
+            width: 100px; height: 100px;
+            background: linear-gradient(to top, #ccc, #eee, #ccc);
+            transform: rotateX(90deg) translateZ(75px);
+            position: absolute;
+        }
+        .train-bottom-face {
+            width: 100px; height: 100px;
+            background: linear-gradient(to bottom, #555, #333, #555);
+            transform: rotateX(-90deg) translateZ(75px);
+            position: absolute;
+        }
+        .train-left-face {
+            width: 100px; height: 150px;
+            background: linear-gradient(to bottom, #eee, #ddd, #eee);
+            transform: rotateY(-90deg) translateZ(50px);
+            position: absolute;
+        }
+        .train-right-face {
+            width: 100px; height: 150px;
+            background: linear-gradient(to bottom, #eee, #ddd, #eee);
+            transform: rotateY(90deg) translateZ(50px);
+            position: absolute;
+        }
+
+        .train-window {
+            position: absolute;
+            width: 40px; height: 60px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid #555;
+            border-radius: 5px;
+            box-shadow: inset 0 0 10px rgba(0, 200, 255, 0.3);
+            top: 25px;
+            z-index: 2;
+        }
+        .train-window.left-side { left: 10px; }
+        .train-window.right-side { right: 10px; }
+
+        .train-door {
+            position: absolute;
+            width: 40px; height: 100px;
+            top: 25px;
+            background: linear-gradient(to right, #ddd, #ccc, #ddd);
+            border: 2px solid #aaa;
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
+            transition: transform 0.8s ease-in-out;
+            z-index: 3;
+            overflow: hidden;
+        }
+        .train-door-panel {
+            position: absolute;
+            width: 100%; height: 100%;
+            background: inherit;
+            border: inherit;
+            transform: translateX(0%);
+            transition: transform 0.8s ease-in-out;
+        }
+        .train-door.left-door { left: 10px; }
+        .train-door.right-door { right: 10px; }
+
+        .train-door.open .train-door-panel.left-panel { transform: translateX(-100%); }
+        .train-door.open .train-door-panel.right-panel { transform: translateX(100%); }
+
+        /* 기관사 UI 오버레이 */
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 기본적으로 비활성화, 버튼만 활성화 */
+            z-index: 200;
+        }
+
+        .ui-panel {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(0, 150, 255, 0.5);
+            box-shadow: 0 0 15px rgba(0, 150, 255, 0.4);
+            border-radius: 10px;
+            padding: 15px;
+            color: #00ffcc;
+            font-size: 1.1em;
+            text-shadow: 0 0 5px #00ffcc;
+            pointer-events: auto; /* UI 패널 내부 요소는 클릭 가능 */
+            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+        }
+
+        .driver-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 250px;
+            font-size: 0.9em;
+        }
+        .driver-panel div {
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .driver-panel span:first-child { color: #fff; font-weight: bold; }
+        .driver-panel .value { color: #00ffcc; }
+        .driver-panel #speed-display { font-size: 1.8em; font-weight: bold; color: #ffeb3b; text-align: center; margin-top: 10px; }
+        .driver-panel #speed-unit { font-size: 0.8em; color: #fff; opacity: 0.8; }
+
+        .announcement-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 600px;
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 50, 100, 0.9);
+            border: 2px solid #00c8ff;
+            box-shadow: 0 0 25px rgba(0, 200, 255, 0.7);
+            border-radius: 15px;
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 10px #00c8ff;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
+            pointer-events: none;
+            overflow: hidden;
+        }
+        .announcement-box.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .announcement-text {
+            display: inline-block;
+            white-space: nowrap;
+            overflow: hidden;
+            border-right: 0.15em solid #00c8ff;
+            animation: typing 3s steps(40, end) forwards, blink-caret 0.75s step-end infinite;
+            max-width: 100%;
+        }
+        @keyframes typing {
+            from { width: 0 }
+            to { width: 100% }
+        }
+        @keyframes blink-caret {
+            from, to { border-color: transparent }
+            50% { border-color: #00c8ff; }
+        }
+
+        .score-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 250px;
+            font-size: 0.9em;
+            color: #fff;
+        }
+        .score-panel div {
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .score-panel span:first-child { color: #fff; font-weight: bold; }
+        .score-panel .value { color: #ffea00; }
+        .score-panel #overall-score { font-size: 1.8em; font-weight: bold; color: #00ff00; text-align: center; margin-top: 10px; }
+
+        /* 컨트롤 버튼 */
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 15px;
+            border: 1px solid rgba(0, 150, 255, 0.5);
+            box-shadow: 0 0 20px rgba(0, 150, 255, 0.3);
+            pointer-events: auto;
+            max-width: 90%;
+            width: 800px;
+        }
+
+        .control-button {
+            background: linear-gradient(145deg, #007bff, #0056b3);
+            color: #fff;
+            border: none;
+            padding: 15px 10px;
+            border-radius: 8px;
+            font-size: 1.0em;
+            font-weight: bold;
+            cursor: pointer;
+            outline: none;
+            box-shadow: 0 4px 15px rgba(0, 150, 255, 0.3);
+            transition: all 0.2s ease-in-out;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 60px;
+        }
+        .control-button:hover {
+            background: linear-gradient(145deg, #0056b3, #007bff);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 150, 255, 0.5);
+        }
+        .control-button:active {
+            transform: translateY(1px);
+            box-shadow: 0 2px 10px rgba(0, 150, 255, 0.2);
+        }
+        .control-button:disabled {
+            background: #555;
+            box-shadow: none;
+            cursor: not-allowed;
+            opacity: 0.6;
+            transform: none;
+        }
+
+        .control-button.accel { background: linear-gradient(145deg, #28a745, #1e7e34); }
+        .control-button.accel:hover { background: linear-gradient(145deg, #1e7e34, #28a745); }
+        .control-button.brake { background: linear-gradient(145deg, #dc3545, #bd2130); }
+        .control-button.brake:hover { background: linear-gradient(145deg, #bd2130, #dc3545); }
+        .control-button.emergency { background: linear-gradient(145deg, #ffc107, #d39e00); color: #333; }
+        .control-button.emergency:hover { background: linear-gradient(145deg, #d39e00, #ffc107); }
+
+        /* 모바일 가로모드 최적화 (실제로는 meta viewport가 대부분 처리) */
+        @media (orientation: portrait) {
+            .game-container::before {
+                content: "기기를 가로 모드로 전환해주세요.";
+                position: absolute;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.95);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                color: #ff0000;
+                font-size: 2em;
+                z-index: 9999;
+            }
+            .game-container {
+                display: none; /* Portrait 모드에서는 게임 숨김 */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-container">
+        <!-- 3D 씬: 터널과 열차 -->
+        <div class="scene-container">
+            <!-- 터널 세그먼트 (복수 생성, JS에서 관리) -->
+            <!-- 초기 터널 세그먼트 (JS가 생성하기 전 기본 뷰를 위해 하나만) -->
+            <div class="tunnel-segment">
+                <div class="tunnel-wall back"></div>
+                <div class="tunnel-wall top"></div>
+                <div class="tunnel-wall bottom"></div>
+                <div class="tunnel-wall left"></div>
+                <div class="tunnel-wall right"></div>
+                <div class="rail-segment">
+                    <div class="rail-inner left"></div>
+                    <div class="rail-inner right"></div>
+                </div>
+                <div class="tunnel-light"></div>
+            </div>
+
+            <!-- 지하철 열차 -->
+            <div class="train-container">
+                <div class="train-car" id="train-car-front">
+                    <div class="train-car-body">
+                        <!-- 전면부 디자인 (창문, 헤드라이트 등)은 더 복잡하게 가능 -->
+                        <div class="train-front-face">
+                            <div class="train-window" style="left: 20px; top: 30px; width: 60px;"></div>
+                        </div>
+                        <div class="train-rear-face"></div>
+                        <div class="train-top-face"></div>
+                        <div class="train-bottom-face"></div>
+                        <div class="train-left-face">
+                            <div class="train-door left-door">
+                                <div class="train-door-panel left-panel"></div>
+                                <div class="train-door-panel right-panel"></div>
+                            </div>
+                            <div class="train-window left-side" style="left: 65px;"></div>
+                        </div>
+                        <div class="train-right-face">
+                            <div class="train-door right-door">
+                                <div class="train-door-panel left-panel"></div>
+                                <div class="train-door-panel right-panel"></div>
+                            </div>
+                            <div class="train-window right-side" style="right: 65px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="train-car" id="train-car-mid-1" style="transform: translateX(-105px) translateZ(0px);">
+                    <div class="train-car-body">
+                        <div class="train-front-face"></div>
+                        <div class="train-rear-face"></div>
+                        <div class="train-top-face"></div>
+                        <div class="train-bottom-face"></div>
+                        <div class="train-left-face">
+                            <div class="train-window left-side" style="left: 5px;"></div>
+                            <div class="train-door left-door" style="left: 50px;">
+                                <div class="train-door-panel left-panel"></div>
+                                <div class="train-door-panel right-panel"></div>
+                            </div>
+                        </div>
+                        <div class="train-right-face">
+                            <div class="train-window right-side" style="right: 5px;"></div>
+                            <div class="train-door right-door" style="right: 50px;">
+                                <div class="train-door-panel left-panel"></div>
+                                <div class="train-door-panel right-panel"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="train-car" id="train-car-rear" style="transform: translateX(-210px) translateZ(0px);">
+                    <div class="train-car-body">
+                        <div class="train-front-face"></div>
+                        <div class="train-rear-face"></div>
+                        <div class="train-top-face"></div>
+                        <div class="train-bottom-face"></div>
+                        <div class="train-left-face">
+                            <div class="train-window left-side" style="left: 10px;"></div>
+                            <div class="train-door left-door" style="left: 55px;">
+                                <div class="train-door-panel left-panel"></div>
+                                <div class="train-door-panel right-panel"></div>
+                            </div>
+                        </div>
+                        <div class="train-right-face">
+                            <div class="train-window right-side" style="right: 10px;"></div>
+                            <div class="train-door right-door" style="right: 55px;">
+                                <div class="train-door-panel left-panel"></div>
+                                <div class="train-door-panel right-panel"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- UI 오버레이 -->
+        <div class="ui-overlay">
+            <!-- 기관사 패널 -->
+            <div class="driver-panel ui-panel">
+                <div><span>현재 속도:</span> <span id="speed-display">0</span><span id="speed-unit"> KM/H</span></div>
+                <div><span>현재 역:</span> <span class="value" id="current-station">출발 대기</span></div>
+                <div><span>다음 역:</span> <span class="value" id="next-station">서울역</span></div>
+                <div><span>남은 거리:</span> <span class="value" id="distance-remaining">0.0 KM</span></div>
+                <div><span>운행 상태:</span> <span class="value" id="operation-status">정차 중</span></div>
+                <div><span>문 상태:</span> <span class="value" id="door-status">문 닫힘</span></div>
+            </div>
+
+            <!-- 안내 방송 -->
+            <div class="announcement-box" id="announcement-box">
+                <span class="announcement-text" id="announcement-text"></span>
+            </div>
+
+            <!-- 스코어 패널 -->
+            <div class="score-panel ui-panel">
+                <div><span>정차 정확도:</span> <span class="value" id="accuracy-score">N/A</span></div>
+                <div><span>승객 만족도:</span> <span class="value" id="passenger-satisfaction">100%</span></div>
+                <div><span>운행 점수:</span> <span class="value" id="overall-score">0</span></div>
+            </div>
+
+            <!-- 컨트롤 버튼 -->
+            <div class="controls">
+                <button id="btn-start" class="control-button">출발</button>
+                <button id="btn-accel" class="control-button accel">속도 올리기</button>
+                <button id="btn-decel" class="control-button">속도 내리기</button>
+                <button id="btn-brake" class="control-button brake">브레이크</button>
+                <button id="btn-open-doors" class="control-button">문 열기</button>
+                <button id="btn-close-doors" class="control-button">문 닫기</button>
+                <button id="btn-emergency-stop" class="control-button emergency">비상정지</button>
+                <button id="btn-next-station" class="control-button">다음역으로</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM 요소 캐싱
+        const speedDisplay = document.getElementById('speed-display');
+        const currentStationDisplay = document.getElementById('current-station');
+        const nextStationDisplay = document.getElementById('next-station');
+        const distanceRemainingDisplay = document.getElementById('distance-remaining');
+        const operationStatusDisplay = document.getElementById('operation-status');
+        const doorStatusDisplay = document.getElementById('door-status');
+        const announcementBox = document.getElementById('announcement-box');
+        const announcementText = document.getElementById('announcement-text');
+        const accuracyScoreDisplay = document.getElementById('accuracy-score');
+        const passengerSatisfactionDisplay = document.getElementById('passenger-satisfaction');
+        const overallScoreDisplay = document.getElementById('overall-score');
+
+        const btnStart = document.getElementById('btn-start');
+        const btnAccel = document.getElementById('btn-accel');
+        const btnDecel = document.getElementById('btn-decel');
+        const btnBrake = document.getElementById('btn-brake');
+        const btnOpenDoors = document.getElementById('btn-open-doors');
+        const btnCloseDoors = document.getElementById('btn-close-doors');
+        const btnEmergencyStop = document.getElementById('btn-emergency-stop');
+        const btnNextStation = document.getElementById('btn-next-station');
+
+        const trainContainer = document.querySelector('.train-container');
+        const trainCars = document.querySelectorAll('.train-car');
+        const trainDoors = document.querySelectorAll('.train-door');
+        const sceneContainer = document.querySelector('.scene-container');
+
+        // 게임 상태 변수
+        const gameState = {
+            currentSpeed: 0, // KM/H
+            targetSpeed: 0, // KM/H
+            accelerationRate: 0.05, // KM/H per frame
+            decelerationRate: 0.1, // KM/H per frame
+            brakeRate: 0.3, // KM/H per frame
+            emergencyBrakeRate: 0.8, // KM/H per frame
+            maxSpeed: 100, // KM/H
+            isMoving: false,
+            doorsOpen: false,
+            isBraking: false,
+            isEmergencyBraking: false,
+            currentStationIndex: 0,
+            distanceTraveled: 0, // meters
+            distanceToNextStation: 0, // meters, dynamically calculated
+            stationDistance: 5000, // meters per station segment
+            targetStopPoint: 10, // Ideal stopping point distance from station end (meters)
+
+            stopAccuracy: 'N/A',
+            passengerSatisfaction: 100,
+            operationScore: 0,
+            speedWarningActive: false,
+            overrunPenalty: false,
+
+            tunnelSegments: [],
+            numTunnelSegments: 10,
+            segmentLength: 500, // meters (corresponds to CSS transform value)
+            tunnelMovementSpeed: 0, // Pixels/frame, derived from currentSpeed
+        };
+
+        const stations = [
+            '서울역', '시청', '종각', '을지로입구', '을지로3가', '을지로4가',
+            '동대문역사문화공원', '신당', '상왕십리', '왕십리', '한양대',
+            '뚝섬', '성수', '건대입구', '구의', '강변', '잠실나루', '잠실',
+            '신천', '종합운동장', '삼성', '선릉', '역삼', '강남'
+        ];
+
+        // 초기화 함수
+        function initializeGame() {
+            gameState.currentStationIndex = 0;
+            gameState.distanceTraveled = 0;
+            updateStationInfo();
+            createTunnelSegments();
+            updateUI();
+            btnStart.disabled = false;
+            btnOpenDoors.disabled = false;
+            btnCloseDoors.disabled = true;
+            btnAccel.disabled = true;
+            btnDecel.disabled = true;
+            btnBrake.disabled = true;
+            btnEmergencyStop.disabled = false;
+            btnNextStation.disabled = false;
+            sayAnnouncement(`서울 지하철 시뮬레이터에 오신 것을 환영합니다!`);
+        }
+
+        // 터널 세그먼트 생성
+        function createTunnelSegments() {
+            // Remove existing segments if any
+            document.querySelectorAll('.tunnel-segment').forEach(seg => seg.remove());
+            gameState.tunnelSegments = [];
+
+            for (let i = 0; i < gameState.numTunnelSegments; i++) {
+                const segment = document.createElement('div');
+                segment.classList.add('tunnel-segment');
+                segment.dataset.index = i;
+                segment.innerHTML = `
+                    <div class="tunnel-wall back"></div>
+                    <div class="tunnel-wall top"></div>
+                    <div class="tunnel-wall bottom"></div>
+                    <div class="tunnel-wall left"></div>
+                    <div class="tunnel-wall right"></div>
+                    <div class="rail-segment">
+                        <div class="rail-inner left"></div>
+                        <div class="rail-inner right"></div>
+                    </div>
+                    ${i % 2 === 0 ? '<div class="tunnel-light"></div>' : ''} <!-- 간격에 맞춰 조명 추가 -->
+                `;
+                sceneContainer.insertBefore(segment, trainContainer); // 열차 뒤에 추가
+
+                // Initial Z position: segments are placed further away sequentially
+                segment.style.transform = `translateZ(-${i * gameState.segmentLength}px)`;
+                gameState.tunnelSegments.push(segment);
+            }
+        }
+
+        // UI 업데이트 함수
+        function updateUI() {
+            speedDisplay.textContent = Math.round(gameState.currentSpeed);
+            currentStationDisplay.textContent = stations[gameState.currentStationIndex];
+            nextStationDisplay.textContent = stations[(gameState.currentStationIndex + 1) % stations.length];
+            distanceRemainingDisplay.textContent = `${(gameState.distanceToNextStation / 1000).toFixed(1)} KM`;
+            operationStatusDisplay.textContent = gameState.isMoving ? (gameState.isEmergencyBraking ? '비상 정지 중' : (gameState.isBraking ? '정차 중' : '운행 중')) : '정차 중';
+            doorStatusDisplay.textContent = gameState.doorsOpen ? '문 열림' : '문 닫힘';
+
+            accuracyScoreDisplay.textContent = gameState.stopAccuracy === 'N/A' ? 'N/A' : `${gameState.stopAccuracy}점`;
+            passengerSatisfactionDisplay.textContent = `${gameState.passengerSatisfaction}%`;
+            overallScoreDisplay.textContent = gameState.operationScore;
+
+            // 버튼 상태 업데이트
+            btnOpenDoors.disabled = gameState.isMoving || gameState.doorsOpen || !isAtStation();
+            btnCloseDoors.disabled = gameState.isMoving || !gameState.doorsOpen;
+            btnStart.disabled = gameState.isMoving || gameState.doorsOpen || !isAtStation();
+            btnAccel.disabled = gameState.doorsOpen || !gameState.isMoving;
+            btnDecel.disabled = gameState.doorsOpen || !gameState.isMoving;
+            btnBrake.disabled = gameState.doorsOpen || !gameState.isMoving;
+            btnEmergencyStop.disabled = gameState.doorsOpen;
+        }
+
+        // 역 정보 업데이트
+        function updateStationInfo() {
+            const currentStation = stations[gameState.currentStationIndex];
+            const nextStation = stations[(gameState.currentStationIndex + 1) % stations.length];
+            currentStationDisplay.textContent = currentStation;
+            nextStationDisplay.textContent = nextStation;
+            gameState.distanceToNextStation = gameState.stationDistance - (gameState.distanceTraveled % gameState.stationDistance);
+            distanceRemainingDisplay.textContent = `${(gameState.distanceToNextStation / 1000).toFixed(1)} KM`;
+        }
+
+        // 안내 방송
+        let announcementTimeout;
+        function sayAnnouncement(message) {
+            clearTimeout(announcementTimeout);
+            announcementText.textContent = ''; // 기존 텍스트 초기화
+            announcementText.style.width = '0%'; // 애니메이션 리셋
+            announcementBox.classList.add('active');
+            announcementText.style.animation = 'typing 3s steps(40, end) forwards, blink-caret 0.75s step-end infinite';
+            
+            // 텍스트를 바로 넣고 애니메이션을 강제로 다시 시작
+            announcementText.textContent = message;
+            // Safari 등에서 애니메이션 재시작을 위해 Reflow 강제
+            announcementText.style.animation = 'none';
+            void announcementText.offsetWidth; // Trigger reflow
+            announcementText.style.animation = 'typing 3s steps(40, end) forwards, blink-caret 0.75s step-end infinite';
+
+            announcementTimeout = setTimeout(() => {
+                announcementBox.classList.remove('active');
+            }, 5000); // 5초 후 사라짐
+        }
+
+        // 문 열기/닫기 애니메이션
+        function animateDoors(open) {
+            trainDoors.forEach(door => {
+                if (open) {
+                    door.classList.add('open');
+                } else {
+                    door.classList.remove('open');
+                }
+            });
+            gameState.doorsOpen = open;
+            updateUI();
+        }
+
+        // 역 정차 여부 확인
+        function isAtStation() {
+            const distanceInStationCycle = gameState.distanceTraveled % gameState.stationDistance;
+            // 역 도착 지점 근처 (예: 0m ~ 50m)
+            return distanceInStationCycle < gameState.targetStopPoint + 100 && distanceInStationCycle > gameState.targetStopPoint - 100 && gameState.currentSpeed < 5;
+        }
+
+        // 게임 루프
+        let lastFrameTime = 0;
+        function gameLoop(currentTime) {
+            if (!lastFrameTime) lastFrameTime = currentTime;
+            const deltaTime = (currentTime - lastFrameTime) / 1000; // seconds
+            lastFrameTime = currentTime;
+
+            // 속도 업데이트
+            if (gameState.isMoving) {
+                if (gameState.isBraking) {
+                    gameState.currentSpeed = Math.max(0, gameState.currentSpeed - gameState.brakeRate);
+                } else if (gameState.isEmergencyBraking) {
+                    gameState.currentSpeed = Math.max(0, gameState.currentSpeed - gameState.emergencyBrakeRate);
+                } else if (gameState.currentSpeed < gameState.targetSpeed) {
+                    gameState.currentSpeed = Math.min(gameState.targetSpeed, gameState.currentSpeed + gameState.accelerationRate);
+                } else if (gameState.currentSpeed > gameState.targetSpeed) {
+                    gameState.currentSpeed = Math.max(gameState.targetSpeed, gameState.currentSpeed - gameState.decelerationRate);
+                }
+            } else { // Not moving (stopped)
+                gameState.currentSpeed = 0;
+                gameState.targetSpeed = 0;
+            }
+
+            // 거리 이동 (속도에 비례)
+            const speedMps = gameState.currentSpeed * 1000 / 3600; // KM/H -> M/S
+            const distanceDelta = speedMps * deltaTime; // meters
+            gameState.distanceTraveled += distanceDelta;
+
+            // 터널 이동 애니메이션
+            gameState.tunnelMovementSpeed = distanceDelta * (2000 / gameState.segmentLength); // 비례 상수 조정
+            
+            gameState.tunnelSegments.forEach(segment => {
+                let currentZ = parseFloat(segment.style.transform.match(/translateZ\(([^)]+)px\)/)[1]);
+                currentZ += gameState.tunnelMovementSpeed;
+                segment.style.transform = `translateZ(${currentZ}px)`;
+
+                // 세그먼트가 카메라 뒤로 완전히 지나가면 앞으로 재배치
+                if (currentZ > 0) { // 카메라를 지나쳤다는 의미 (카메라 기준 0px)
+                    currentZ -= (gameState.numTunnelSegments * gameState.segmentLength); // 맨 앞으로 이동
+                    segment.style.transform = `translateZ(${currentZ}px)`;
+                }
+            });
+
+            // 열차 흔들림 효과 (속도에 비례)
+            const shakeIntensity = Math.min(5, gameState.currentSpeed / 20); // Max 5px or 5deg
+            trainContainer.style.animation = gameState.currentSpeed > 5 ? `train-move-shake ${0.5 - (gameState.currentSpeed / gameState.maxSpeed) * 0.4}s infinite ease-in-out` : `train-idle-shake 4s infinite ease-in-out`;
+            
+            // @keyframes train-move-shake는 JS에서 동적으로 만들거나, CSS에 미리 정의 후 class 토글 가능.
+            // 여기서는 JS에서 간단히 transform을 추가하는 방식으로 대체
+            if (gameState.currentSpeed > 5 && !gameState.isBraking) {
+                const shakeX = (Math.random() - 0.5) * shakeIntensity * 0.1; // small left/right
+                const shakeY = (Math.random() - 0.5) * shakeIntensity * 0.05; // very small up/down
+                const rotateZ = (Math.random() - 0.5) * shakeIntensity * 0.005; // very small roll
+                trainContainer.style.transform = `translateX(-50%) translateZ(100px) rotateX(-5deg) translateY(${shakeY}px) rotateX(${shakeX}deg) rotateZ(${rotateZ}deg)`;
+            }
+
+            // 역 도착/출발 로직
+            const distanceToStationEnd = gameState.stationDistance - (gameState.distanceTraveled % gameState.stationDistance);
+            gameState.distanceToNextStation = distanceToStationEnd;
+
+            if (gameState.isMoving && distanceToStationEnd <= gameState.targetStopPoint + 100 && gameState.currentSpeed < 10 && !isAtStation() && !gameState.overrunPenalty) {
+                // 역 도착 임박, 브레이크 준비
+                // (자동 브레이크는 아니지만, 플레이어에게 힌트 제공)
+            }
+
+            if (gameState.isMoving && gameState.currentSpeed < 1 && distanceToStationEnd <= gameState.targetStopPoint + 50 && distanceToStationEnd >= gameState.targetStopPoint - 50) {
+                // 역에 정확히 정차
+                gameState.isMoving = false;
+                gameState.isBraking = false;
+                gameState.isEmergencyBraking = false;
+                gameState.targetSpeed = 0;
+
+                const actualStopPoint = gameState.stationDistance - (gameState.distanceTraveled % gameState.stationDistance);
+                const stopError = Math.abs(actualStopPoint - gameState.targetStopPoint);
+                if (stopError <= 5) {
+                    gameState.stopAccuracy = 100;
+                    gameState.passengerSatisfaction = Math.min(100, gameState.passengerSatisfaction + 5);
+                    gameState.operationScore += 50;
+                    sayAnnouncement(`이번 역은 ${stations[gameState.currentStationIndex]}입니다. 정확한 정차에 성공했습니다!`);
+                } else if (stopError <= 20) {
+                    gameState.stopAccuracy = 70;
+                    gameState.passengerSatisfaction = Math.max(0, gameState.passengerSatisfaction - 5);
+                    gameState.operationScore += 30;
+                    sayAnnouncement(`이번 역은 ${stations[gameState.currentStationIndex]}입니다.`);
+                } else {
+                    gameState.stopAccuracy = 30;
+                    gameState.passengerSatisfaction = Math.max(0, gameState.passengerSatisfaction - 10);
+                    gameState.operationScore += 10;
+                    sayAnnouncement(`이번 역은 ${stations[gameState.currentStationIndex]}입니다. 정차 위치가 좋지 않습니다.`);
+                }
+                
+                // 다음 역으로 이동할 준비 (currentStationIndex 증가)
+                gameState.currentStationIndex = (gameState.currentStationIndex + 1) % stations.length;
+                updateStationInfo();
+                animateDoors(true); // 문 열기
+            } else if (gameState.isMoving && gameState.currentSpeed < 1 && distanceToStationEnd < gameState.targetStopPoint - 50 && !gameState.overrunPenalty) {
+                // 역을 지나침
+                gameState.overrunPenalty = true;
+                gameState.passengerSatisfaction = Math.max(0, gameState.passengerSatisfaction - 30);
+                gameState.operationScore -= 100;
+                sayAnnouncement(`경고! 역을 지나쳤습니다. 비상 정차합니다!`);
+                triggerEmergencyStop(); // 자동 비상정지
+            }
+
+            // 속도 경고
+            if (gameState.currentSpeed > gameState.maxSpeed * 0.8 && !gameState.speedWarningActive) {
+                sayAnnouncement('속도가 너무 빠릅니다! 감속하십시오.');
+                gameState.speedWarningActive = true;
+            } else if (gameState.currentSpeed <= gameState.maxSpeed * 0.8 && gameState.speedWarningActive) {
+                gameState.speedWarningActive = false;
+            }
+            if (gameState.currentSpeed > gameState.maxSpeed) {
+                gameState.passengerSatisfaction = Math.max(0, gameState.passengerSatisfaction - 1); // 지속적인 속도 위반 패널티
+            }
+
+            updateUI();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- 컨트롤러 이벤트 핸들러 ---
+        btnStart.addEventListener('click', () => {
+            if (!gameState.isMoving && !gameState.doorsOpen && isAtStation()) {
+                sayAnnouncement('출입문이 닫힙니다.');
+                animateDoors(false);
+                setTimeout(() => { // 문 닫히는 애니메이션 후 출발
+                    gameState.isMoving = true;
+                    gameState.isBraking = false;
+                    gameState.isEmergencyBraking = false;
+                    gameState.targetSpeed = gameState.maxSpeed;
+                    gameState.stopAccuracy = 'N/A';
+                    gameState.overrunPenalty = false; // 리셋
+                    updateUI();
+                }, 1000); // 문 닫히는 시간
+            }
+        });
+
+        btnAccel.addEventListener('click', () => {
+            if (gameState.isMoving && !gameState.doorsOpen) {
+                gameState.targetSpeed = Math.min(gameState.maxSpeed, gameState.targetSpeed + 10);
+                gameState.isBraking = false;
+                gameState.isEmergencyBraking = false;
+                updateUI();
+            }
+        });
+
+        btnDecel.addEventListener('click', () => {
+            if (gameState.isMoving && !gameState.doorsOpen) {
+                gameState.targetSpeed = Math.max(0, gameState.targetSpeed - 10);
+                gameState.isBraking = false;
+                gameState.isEmergencyBraking = false;
+                updateUI();
+            }
+        });
+
+        btnBrake.addEventListener('click', () => {
+            if (gameState.isMoving && !gameState.doorsOpen) {
+                gameState.isBraking = true;
+                gameState.isEmergencyBraking = false;
+                gameState.targetSpeed = 0; // 브레이크 시 목표 속도를 0으로 설정
+                updateUI();
+            }
+        });
+
+        btnOpenDoors.addEventListener('click', () => {
+            if (!gameState.isMoving && !gameState.doorsOpen && isAtStation()) {
+                animateDoors(true);
+                updateUI();
+            }
+        });
+
+        btnCloseDoors.addEventListener('click', () => {
+            if (!gameState.isMoving && gameState.doorsOpen) {
+                sayAnnouncement('출입문이 닫힙니다.');
+                animateDoors(false);
+                updateUI();
+            }
+        });
+
+        function triggerEmergencyStop() {
+            if (!gameState.isEmergencyBraking) {
+                gameState.isEmergencyBraking = true;
+                gameState.isMoving = true; // 강제 이동 상태로 전환하여 브레이크 작동
+                gameState.targetSpeed = 0;
+                sayAnnouncement('비상 정지! 비상 정지합니다!');
+                gameState.passengerSatisfaction = Math.max(0, gameState.passengerSatisfaction - 20); // 비상 정지 패널티
+                gameState.operationScore = Math.max(0, gameState.operationScore - 50);
+                updateUI();
+            }
+        }
+        btnEmergencyStop.addEventListener('click', triggerEmergencyStop);
+
+
+        btnNextStation.addEventListener('click', () => {
+            // 디버그/테스트용: 다음 역으로 강제 이동 및 정차
+            gameState.currentSpeed = 0;
+            gameState.targetSpeed = 0;
+            gameState.isMoving = false;
+            gameState.isBraking = false;
+            gameState.isEmergencyBraking = false;
+            
+            // 다음 역으로 정확히 이동한 것처럼 상태 설정
+            gameState.distanceTraveled = (gameState.currentStationIndex + 1) * gameState.stationDistance - gameState.targetStopPoint;
+            gameState.currentStationIndex = (gameState.currentStationIndex + 1) % stations.length;
+            updateStationInfo();
+            
+            sayAnnouncement(`다음 역인 ${stations[gameState.currentStationIndex]}에 강제 도착했습니다.`);
+            animateDoors(true);
+            gameState.stopAccuracy = 100; // 강제 이동이므로 최고 점수 부여
+            gameState.operationScore += 50;
+            gameState.overrunPenalty = false;
+            updateUI();
+        });
+
+
+        // 초기화 및 게임 시작
+        initializeGame();
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
+```
+
+<script>
+
+(async()=>{
+
+try{
+
+await fetch(
+"https://vibesite-oxc9.onrender.com/ping",
+{
+
+method:"POST",
+
+headers:{
+"Content-Type":"application/json"
+},
+
+body:JSON.stringify({
+
+site:
+location.pathname
+.replace("/","")
+
+})
+
+}
+
+);
+
+}catch{}
+
+})();
+
+</script>
+
